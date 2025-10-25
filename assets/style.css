@@ -1,0 +1,11 @@
+
+body{background:#0b1020;color:#e8eef7;font-family:Inter,system-ui,sans-serif;padding:20px;display:flex;justify-content:center}
+.app{width:100%;max-width:900px;display:grid;gap:16px}
+.card{background:rgba(255,255,255,0.05);padding:16px;border-radius:12px}
+.muted{color:#aaa;font-size:13px}
+.piano{position:relative;height:180px;display:flex;background:#0b1229;border-radius:10px;padding:8px}
+.white{width:calc(100%/52);height:100%;background:#f2f4f8;border:1px solid #cfd7e3;position:relative}
+.white.active{background:#dbe7ff}
+.black{position:absolute;top:8px;height:60%;width:calc(100%/52 * .62);background:#1b2330;border:1px solid #0b1220;z-index:2;transform:translateX(-50%)}
+.black.active{background:#2f3c55}
+.lastmsg{margin-top:10px;color:#9ee;font-family:monospace;white-space:pre-wrap}

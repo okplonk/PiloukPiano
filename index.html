@@ -1,0 +1,94 @@
+
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat → Piano (OkPlonk)</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <h1>Chat → Piano (OkPlonk 88 notes fixes)</h1>
+      <div class="muted">Connexion automatique au chat public <code>okplonk</code>. Lettres accentuées fusionnées. Symboles ajoutés pour 88 notes.</div>
+      <button id="audio">Activer l'audio</button>
+      <span id="state" class="muted">Audio inactif · Connexion...</span>
+      <div id="lastmsg" class="lastmsg"></div>
+    </div>
+    <div class="card"><div id="piano" class="piano"></div></div>
+  </div>
+
+  <script src="js/tmi.min.js"></script>
+  <script>
+    const CHAR_SET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,?!:;()[]{}@#%&*+-=/<>^~_|$1234567890".split('');
+
+    const accentMap = {
+      'à':'a','á':'a','â':'a','ä':'a','ã':'a','å':'a',
+      'ç':'c','è':'e','é':'e','ê':'e','ë':'e',
+      'ì':'i','í':'i','î':'i','ï':'i',
+      'ñ':'n','ò':'o','ó':'o','ô':'o','ö':'o','õ':'o',
+      'ù':'u','ú':'u','û':'u','ü':'u','ÿ':'y',
+      'À':'A','Á':'A','Â':'A','Ä':'A','Ã':'A','Å':'A',
+      'Ç':'C','È':'E','É':'E','Ê':'E','Ë':'E',
+      'Ì':'I','Í':'I','Î':'I','Ï':'I',
+      'Ñ':'N','Ò':'O','Ó':'O','Ô':'O','Ö':'O','Õ':'O',
+      'Ù':'U','Ú':'U','Û':'U','Ü':'U','Ÿ':'Y'
+    };
+
+    let actx=null, master=null; const heldNodes=new Set();
+    function ensureAudio(){ if(actx) return true;
+      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain();
+        master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
+      catch(e){ alert('AudioContext non supporté'); return false; }
+    }
+    function noteFreq(i){ const n=i+1; return 440*Math.pow(2,(n-49)/12); }
+    function playKey(i){ if(!actx)return;
+      const osc=actx.createOscillator(); const g=actx.createGain();
+      osc.type='triangle'; osc.frequency.value=noteFreq(i);
+      const t=actx.currentTime,a=0.004,r=0.08;
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.9,t+a);
+      g.gain.exponentialRampToValueAtTime(0.0008,t+a+r);
+      osc.connect(g); g.connect(master); osc.start(t); osc.stop(t+a+r+0.01);
+      flashKey(i);
+    }
+    const pianoEl=document.getElementById('piano'); const keyEls=[];
+    (function buildPiano(){
+      for(let i=0;i<52;i++){const w=document.createElement('div');w.className='white';pianoEl.appendChild(w);}
+      const ww=()=>pianoEl.getBoundingClientRect().width/52;
+      function place(){keyEls.length=0;pianoEl.querySelectorAll('.black').forEach(b=>b.remove());
+        let wi=0;for(let k=0;k<88;k++){const p=(k+9)%12;const isB=(p==1||p==3||p==6||p==8||p==10);
+          if(isB){const x=wi*ww();const b=document.createElement('div');b.className='black';b.style.left=x+'px';pianoEl.appendChild(b);keyEls[k]=b;}
+          else{const w=pianoEl.children[wi];keyEls[k]=w;wi++;}
+        }}
+      new ResizeObserver(place).observe(pianoEl); place();
+    })();
+    function flashKey(i){const e=keyEls[i];if(!e)return;e.classList.add('active');setTimeout(()=>e.classList.remove('active'),120);}
+
+    let client=null;
+    async function connectChat(){
+      if(client) try{await client.disconnect();}catch{}
+      client=new tmi.Client({connection:{secure:true,reconnect:true},channels:['okplonk']});
+      client.on('message',(chan,tags,msg,self)=>{if(self)return;trigger(msg);});
+      client.on('connected',()=>setState('connected')); client.on('disconnected',()=>setState('disconnected'));
+      try{await client.connect();}catch(e){console.error(e);}
+    }
+
+    function normalizeChar(c){return accentMap[c]||c;}
+    function trigger(txt){if(!ensureAudio())return;
+      document.getElementById('lastmsg').textContent=txt;
+      let d=0; for(const raw of Array.from(txt)){const c=normalizeChar(raw);const i=CHAR_SET.indexOf(c);
+        if(i!==-1){setTimeout(()=>playKey(i),d*1000);d+=0.04;}}
+    }
+
+    document.getElementById('audio').addEventListener('click',()=>{if(ensureAudio())actx.resume();});
+    function setState(status){const s=document.getElementById('state');
+      let state='Audio '+(actx?(actx.state==='running'?'actif':'prêt'):'inactif');
+      if(status==='connected')state+=' · ✅ Connecté au chat okplonk';
+      else if(status==='disconnected')state+=' · ❌ Déconnecté';
+      else state+=' · Connexion...';
+      s.textContent=state;}
+    connectChat();
+  </script>
+</body>
+</html>
