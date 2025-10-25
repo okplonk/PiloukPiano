@@ -4,91 +4,229 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chat → Piano (OkPlonk)</title>
-  <link rel="stylesheet" href="assets/style.css" />
+  <title>Chat → Piano (88 notes · A–Z, a–z, symboles · IRC direct)</title>
+  <style>
+    :root{--bg:#0b1020;--card:#0f1630;--accent:#94e2ff;--muted:#9aa4b2}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 600px at 20% 0%,#0e1740,#0a1024);color:#e8eef7;font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;padding:20px;display:flex;justify-content:center}
+    .app{width:100%;max-width:1100px;display:grid;grid-template-columns:1fr;gap:16px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.06);border-radius:14px;box-shadow:0 10px 30px rgba(2,6,23,.55);padding:16px}
+    h1{font-size:20px;margin:0 0 6px}
+    .muted{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    button{background:linear-gradient(180deg,#0f1b3d,#0c1530);border:1px solid rgba(255,255,255,0.08);color:#e8eef7;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
+    .piano{position:relative;height:180px;user-select:none;display:flex; background:#0b1229;border-radius:10px;padding:8px}
+    .white{width:calc(100%/52);height:100%;background:#f2f4f8;border:1px solid #cfd7e3;position:relative}
+    .white.active{background:#dbe7ff}
+    .black{position:absolute;top:8px;height:60%;width:calc(100%/52 * .62);background:#1b2330;border:1px solid #0b1220;z-index:2;transform:translateX(-50%)}
+    .black.active{background:#2f3c55}
+    .log{background:#0a122b;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;max-height:220px;overflow:auto}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .maprow{display:flex;justify-content:space-between;gap:10px;background:rgba(255,255,255,0.04);padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06)}
+    .maprow code{background:#0a122b;border:1px solid rgba(255,255,255,0.1);padding:2px 6px;border-radius:6px}
+    .ok{color:#86efac} .err{color:#fda4af} .warn{color:#fde68a} .info{color:#93c5fd}
+  </style>
 </head>
 <body>
   <div class="app">
     <div class="card">
-      <h1>Chat → Piano (OkPlonk 88 notes fixes)</h1>
-      <div class="muted">Connexion automatique au chat public <code>okplonk</code>. Lettres accentuées fusionnées. Symboles ajoutés pour 88 notes.</div>
-      <button id="audio">Activer l'audio</button>
-      <span id="state" class="muted">Audio inactif · Connexion...</span>
-      <div id="lastmsg" class="lastmsg"></div>
+      <h1>Chat → Piano (88 notes fixes)</h1>
+      <div class="muted">Mapping ordre: <strong>A–Z</strong>, puis <strong>a–z</strong>, puis <strong>symboles</strong> → 88 notes (A0 → C8). Chiffres = silences (1=0.1s … 9=0.9s, 0=1s).</div>
+      <div class="row" style="margin-top:8px">
+        <button id="audio">Activer l'audio</button>
+        <span id="state" class="muted">Audio inactif · En attente</span>
+      </div>
     </div>
-    <div class="card"><div id="piano" class="piano"></div></div>
+
+    <div class="card">
+      <strong>Piano</strong>
+      <div id="piano" class="piano" aria-label="88 touches (blanches et noires)"></div>
+    </div>
+
+    <div class="card">
+      <strong>Dernier message</strong>
+      <div id="lastmsg" class="log"></div>
+    </div>
+
+    <div class="card">
+      <strong>Récapitulatif des mappages</strong>
+      <div id="recap" class="grid"></div>
+    </div>
+
+    <div class="card">
+      <strong>Logs de connexion</strong>
+      <div id="logs" class="log"></div>
+    </div>
   </div>
 
-  <script src="js/tmi.min.js"></script>
   <script>
-    const CHAR_SET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,?!:;()[]{}@#%&*+-=/<>^~_|$1234567890".split('');
+    // ————————————————————————————————
+    // 1) Définition du mapping 88 caractères
+    // ————————————————————————————————
+    const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
 
-    const accentMap = {
-      'à':'a','á':'a','â':'a','ä':'a','ã':'a','å':'a',
-      'ç':'c','è':'e','é':'e','ê':'e','ë':'e',
-      'ì':'i','í':'i','î':'i','ï':'i',
-      'ñ':'n','ò':'o','ó':'o','ô':'o','ö':'o','õ':'o',
-      'ù':'u','ú':'u','û':'u','ü':'u','ÿ':'y',
-      'À':'A','Á':'A','Â':'A','Ä':'A','Ã':'A','Å':'A',
-      'Ç':'C','È':'E','É':'E','Ê':'E','Ë':'E',
-      'Ì':'I','Í':'I','Î':'I','Ï':'I',
-      'Ñ':'N','Ò':'O','Ó':'O','Ô':'O','Ö':'O','Õ':'O',
-      'Ù':'U','Ú':'U','Û':'U','Ü':'U','Ÿ':'Y'
-    };
-
-    let actx=null, master=null; const heldNodes=new Set();
+    // ————————————————————————————————
+    // 2) Audio & utilitaires musique
+    // ————————————————————————————————
+    let actx=null, master=null;
     function ensureAudio(){ if(actx) return true;
-      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain();
-        master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
-      catch(e){ alert('AudioContext non supporté'); return false; }
+      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
+      catch(e){ log('AudioContext non supporté','err'); return false; }
     }
-    function noteFreq(i){ const n=i+1; return 440*Math.pow(2,(n-49)/12); }
-    function playKey(i){ if(!actx)return;
-      const osc=actx.createOscillator(); const g=actx.createGain();
-      osc.type='triangle'; osc.frequency.value=noteFreq(i);
-      const t=actx.currentTime,a=0.004,r=0.08;
-      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.9,t+a);
-      g.gain.exponentialRampToValueAtTime(0.0008,t+a+r);
-      osc.connect(g); g.connect(master); osc.start(t); osc.stop(t+a+r+0.01);
-      flashKey(i);
+    function midiToFreq(m){ return 440 * Math.pow(2, (m - 69)/12); } // A4=440
+    function midiName(m){
+      const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      const name = names[m%12];
+      const oct = Math.floor((m-12)/12);
+      return name+oct;
     }
-    const pianoEl=document.getElementById('piano'); const keyEls=[];
+    function playMidi(midi, dur=0.1){
+      if(!actx) return;
+      const osc=actx.createOscillator(), g=actx.createGain();
+      osc.type='triangle'; osc.frequency.value=midiToFreq(midi);
+      const t=actx.currentTime, a=Math.min(0.012, dur*0.25), r=Math.max(0.02, dur*0.75);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.9,t+a);
+      g.gain.exponentialRampToValueAtTime(0.0009,t+a+r);
+      osc.connect(g); g.connect(master);
+      osc.start(t); osc.stop(t+a+r+0.01);
+      flashByMidi(midi);
+    }
+
+    // ————————————————————————————————
+    // 3) Piano visuel (blanches + noires)
+    // ————————————————————————————————
+    const pianoEl = document.getElementById('piano'); const keyEls=[];
+    const A0_MIDI = 21; // A0
     (function buildPiano(){
-      for(let i=0;i<52;i++){const w=document.createElement('div');w.className='white';pianoEl.appendChild(w);}
+      // 52 blanches
+      for(let i=0;i<52;i++){ const w=document.createElement('div'); w.className='white'; pianoEl.appendChild(w); }
       const ww=()=>pianoEl.getBoundingClientRect().width/52;
-      function place(){keyEls.length=0;pianoEl.querySelectorAll('.black').forEach(b=>b.remove());
-        let wi=0;for(let k=0;k<88;k++){const p=(k+9)%12;const isB=(p==1||p==3||p==6||p==8||p==10);
-          if(isB){const x=wi*ww();const b=document.createElement('div');b.className='black';b.style.left=x+'px';pianoEl.appendChild(b);keyEls[k]=b;}
-          else{const w=pianoEl.children[wi];keyEls[k]=w;wi++;}
-        }}
+      function isBlack(midi){ const pc = midi % 12; return [1,3,6,8,10].includes(pc); } // C# D# F# G# A#
+      function place(){
+        keyEls.length=0; pianoEl.querySelectorAll('.black').forEach(b=>b.remove());
+        let wi=0;
+        for(let k=0;k<88;k++){
+          const midi = A0_MIDI + k;
+          if(isBlack(midi)){
+            const x = wi*ww();
+            const b = document.createElement('div'); b.className='black'; b.style.left = x+'px';
+            pianoEl.appendChild(b); keyEls[k] = b;
+          }else{
+            const w = pianoEl.children[wi]; keyEls[k] = w; wi++;
+          }
+        }
+      }
       new ResizeObserver(place).observe(pianoEl); place();
     })();
-    function flashKey(i){const e=keyEls[i];if(!e)return;e.classList.add('active');setTimeout(()=>e.classList.remove('active'),120);}
-
-    let client=null;
-    async function connectChat(){
-      if(client) try{await client.disconnect();}catch{}
-      client=new tmi.Client({connection:{secure:true,reconnect:true},channels:['okplonk']});
-      client.on('message',(chan,tags,msg,self)=>{if(self)return;trigger(msg);});
-      client.on('connected',()=>setState('connected')); client.on('disconnected',()=>setState('disconnected'));
-      try{await client.connect();}catch(e){console.error(e);}
+    function flashByMidi(midi){
+      const k = midi - A0_MIDI; const el = keyEls[k]; if(!el) return;
+      el.classList.add('active'); setTimeout(()=>el.classList.remove('active'), 140);
     }
 
-    function normalizeChar(c){return accentMap[c]||c;}
-    function trigger(txt){if(!ensureAudio())return;
-      document.getElementById('lastmsg').textContent=txt;
-      let d=0; for(const raw of Array.from(txt)){const c=normalizeChar(raw);const i=CHAR_SET.indexOf(c);
-        if(i!==-1){setTimeout(()=>playKey(i),d*1000);d+=0.04;}}
+    // ————————————————————————————————
+    // 4) Récapitulatif visuel du mappage
+    // ————————————————————————————————
+    (function buildRecap(){
+      const wrap = document.getElementById('recap');
+      for(let i=0;i<88;i++){
+        const ch = CHAR_LIST[i];
+        const midi = 21 + i;
+        const el = document.createElement('div'); el.className='maprow';
+        const left = document.createElement('div'); left.innerHTML = '<strong>'+ (ch==' ' ? '&nbsp;' : ch) + '</strong>';
+        const right = document.createElement('div'); right.innerHTML = '<code>'+ midiName(midi) +'</code>';
+        el.appendChild(left); el.appendChild(right);
+        wrap.appendChild(el);
+      }
+    })();
+
+    // ————————————————————————————————
+    // 5) Lecture depuis le chat : #okplonk
+    //    Chiffres = silences (1→0.1s, ..., 9→0.9s, 0→1.0s)
+    // ————————————————————————————————
+    function silenceDuration(ch){
+      if(ch==='0') return 1.0;
+      if(/[1-9]/.test(ch)) return parseInt(ch,10)/10;
+      return null;
+    }
+    function playFromText(txt){
+      if(!ensureAudio()) return;
+      let delay = 0;
+      for(const raw of Array.from(txt)){
+        const ch = raw;
+        const sil = silenceDuration(ch);
+        if(sil !== null){ delay += sil; continue; }
+        const idx = CHAR_LIST.indexOf(ch);
+        if(idx !== -1){
+          const midi = 21 + idx;
+          setTimeout(()=> playMidi(midi, 0.06), delay*1000);
+          delay += 0.06;
+        }
+      }
     }
 
-    document.getElementById('audio').addEventListener('click',()=>{if(ensureAudio())actx.resume();});
-    function setState(status){const s=document.getElementById('state');
-      let state='Audio '+(actx?(actx.state==='running'?'actif':'prêt'):'inactif');
-      if(status==='connected')state+=' · ✅ Connecté au chat okplonk';
-      else if(status==='disconnected')state+=' · ❌ Déconnecté';
-      else state+=' · Connexion...';
-      s.textContent=state;}
-    connectChat();
+    // ————————————————————————————————
+    // 6) IRC WebSocket (anonyme) → #okplonk
+    // ————————————————————————————————
+    let ws=null; let nick='justinfan'+Math.floor(Math.random()*1e6);
+    const chan = '#okplonk';
+    const logs = document.getElementById('logs'); const lastmsg = document.getElementById('lastmsg');
+    const ignoreBots = new Set(['nightbot','streamelements','streamlabs']);
+
+    function connectIRC(){
+      if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) try{ ws.close(); }catch{}
+      log('Connexion au serveur IRC...','info');
+      ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+      ws.onopen = ()=>{
+        log('Socket ouverte. Envoi des CAP/PASS/NICK/JOIN...','ok');
+        send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+        send('PASS SCHMOOPIIE'); // anonymes
+        send('NICK '+nick);
+        send('JOIN '+chan);
+        setState('connecting');
+      };
+      ws.onerror = (e)=>{ log('WS error: '+e,'err'); setState('error'); };
+      ws.onclose = ()=>{ log('Socket fermée. Reconnexion dans 3s...','warn'); setState('closed'); setTimeout(connectIRC,3000); };
+      ws.onmessage = (ev)=>{ handleMessage(ev.data); };
+    }
+    function send(line){ try{ ws && ws.send(line); }catch(e){ log('Send error: '+e,'err'); } }
+    function handleMessage(raw){
+      const lines = raw.split(/\r?\n/).filter(Boolean);
+      for(const line of lines){
+        if(line.startsWith('PING')){ send('PONG :tmi.twitch.tv'); log('← PING | → PONG','info'); continue; }
+        if(line.includes(' 001 '+nick)) log('Connecté au serveur IRC','ok');
+        if(line.includes(' 366 '+nick)){ log('Rejoint '+chan,'ok'); setState('connected'); }
+        const m = line.match(/^(?:@[^ ]* )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/);
+        if(m){
+          const user = (m[1]||'').toLowerCase();
+          if(ignoreBots.has(user)) continue;
+          const msg = m[2]||'';
+          lastmsg.textContent = user+': '+msg;
+          playFromText(msg);
+        }
+      }
+    }
+
+    // ————————————————————————————————
+    // 7) UI
+    // ————————————————————————————————
+    document.getElementById('audio').addEventListener('click', ()=>{ if(ensureAudio()) actx.resume(); });
+    function setState(status){
+      const s=document.getElementById('state');
+      let audio = actx ? (actx.state==='running'?'Audio actif':'Audio prêt') : 'Audio inactif';
+      let net = ' · ';
+      if(status==='connected') net += '✅ Connecté au chat okplonk';
+      else if(status==='connecting') net += 'Connexion au chat okplonk...';
+      else if(status==='closed') net += 'Fermé (reconnexion)';
+      else if(status==='error') net += 'Erreur réseau';
+      else net += 'En attente';
+      s.textContent = audio + net;
+    }
+    function log(t, cls='info'){ const el=document.createElement('div'); el.className=cls; el.textContent='['+new Date().toLocaleTimeString()+'] '+t; logs.appendChild(el); logs.scrollTop=logs.scrollHeight; }
+
+    // Boot
+    connectIRC();
   </script>
 </body>
 </html>
