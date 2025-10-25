@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="fr">
 <head>
@@ -13,6 +12,8 @@
     .app{width:100%;max-width:1100px;display:grid;grid-template-columns:1fr;gap:16px}
     .card{background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.06);border-radius:14px;box-shadow:0 10px 30px rgba(2,6,23,.55);padding:16px}
     h1{font-size:20px;margin:0 0 6px}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{text-decoration:underline}
     .muted{color:var(--muted);font-size:13px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     button{background:linear-gradient(180deg,#0f1b3d,#0c1530);border:1px solid rgba(255,255,255,0.08);color:#e8eef7;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
@@ -32,6 +33,7 @@
   <div class="app">
     <div class="card">
       <h1>Chat → Piano (88 notes fixes)</h1>
+      <div><a href="https://www.twitch.tv/popout/okplonk/chat?popout=" target="_blank">→ Ouvrir le chat Twitch</a></div>
       <div class="muted">Mapping ordre: <strong>A–Z</strong>, puis <strong>a–z</strong>, puis <strong>symboles</strong> → 88 notes (A0 → C8). Chiffres = silences (1=0.1s … 9=0.9s, 0=1s).</div>
       <div class="row" style="margin-top:8px">
         <button id="audio">Activer l'audio</button>
@@ -61,26 +63,14 @@
   </div>
 
   <script>
-    // ————————————————————————————————
-    // 1) Définition du mapping 88 caractères
-    // ————————————————————————————————
     const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
-
-    // ————————————————————————————————
-    // 2) Audio & utilitaires musique
-    // ————————————————————————————————
     let actx=null, master=null;
     function ensureAudio(){ if(actx) return true;
       try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
       catch(e){ log('AudioContext non supporté','err'); return false; }
     }
-    function midiToFreq(m){ return 440 * Math.pow(2, (m - 69)/12); } // A4=440
-    function midiName(m){
-      const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-      const name = names[m%12];
-      const oct = Math.floor((m-12)/12);
-      return name+oct;
-    }
+    function midiToFreq(m){ return 440 * Math.pow(2, (m - 69)/12); }
+    function midiName(m){ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const name = names[m%12]; const oct = Math.floor((m-12)/12); return name+oct; }
     function playMidi(midi, dur=0.1){
       if(!actx) return;
       const osc=actx.createOscillator(), g=actx.createGain();
@@ -93,17 +83,12 @@
       osc.start(t); osc.stop(t+a+r+0.01);
       flashByMidi(midi);
     }
-
-    // ————————————————————————————————
-    // 3) Piano visuel (blanches + noires)
-    // ————————————————————————————————
     const pianoEl = document.getElementById('piano'); const keyEls=[];
-    const A0_MIDI = 21; // A0
+    const A0_MIDI = 21;
     (function buildPiano(){
-      // 52 blanches
       for(let i=0;i<52;i++){ const w=document.createElement('div'); w.className='white'; pianoEl.appendChild(w); }
       const ww=()=>pianoEl.getBoundingClientRect().width/52;
-      function isBlack(midi){ const pc = midi % 12; return [1,3,6,8,10].includes(pc); } // C# D# F# G# A#
+      function isBlack(midi){ const pc = midi % 12; return [1,3,6,8,10].includes(pc); }
       function place(){
         keyEls.length=0; pianoEl.querySelectorAll('.black').forEach(b=>b.remove());
         let wi=0;
@@ -120,68 +105,37 @@
       }
       new ResizeObserver(place).observe(pianoEl); place();
     })();
-    function flashByMidi(midi){
-      const k = midi - A0_MIDI; const el = keyEls[k]; if(!el) return;
-      el.classList.add('active'); setTimeout(()=>el.classList.remove('active'), 140);
-    }
-
-    // ————————————————————————————————
-    // 4) Récapitulatif visuel du mappage
-    // ————————————————————————————————
+    function flashByMidi(midi){ const k = midi - A0_MIDI; const el = keyEls[k]; if(!el) return; el.classList.add('active'); setTimeout(()=>el.classList.remove('active'), 140); }
     (function buildRecap(){
       const wrap = document.getElementById('recap');
       for(let i=0;i<88;i++){
-        const ch = CHAR_LIST[i];
-        const midi = 21 + i;
+        const ch = CHAR_LIST[i]; const midi = 21 + i;
         const el = document.createElement('div'); el.className='maprow';
         const left = document.createElement('div'); left.innerHTML = '<strong>'+ (ch==' ' ? '&nbsp;' : ch) + '</strong>';
         const right = document.createElement('div'); right.innerHTML = '<code>'+ midiName(midi) +'</code>';
-        el.appendChild(left); el.appendChild(right);
-        wrap.appendChild(el);
+        el.appendChild(left); el.appendChild(right); wrap.appendChild(el);
       }
     })();
-
-    // ————————————————————————————————
-    // 5) Lecture depuis le chat : #okplonk
-    //    Chiffres = silences (1→0.1s, ..., 9→0.9s, 0→1.0s)
-    // ————————————————————————————————
-    function silenceDuration(ch){
-      if(ch==='0') return 1.0;
-      if(/[1-9]/.test(ch)) return parseInt(ch,10)/10;
-      return null;
-    }
+    function silenceDuration(ch){ if(ch==='0') return 1.0; if(/[1-9]/.test(ch)) return parseInt(ch,10)/10; return null; }
     function playFromText(txt){
-      if(!ensureAudio()) return;
-      let delay = 0;
-      for(const raw of Array.from(txt)){
-        const ch = raw;
-        const sil = silenceDuration(ch);
+      if(!ensureAudio()) return; let delay = 0;
+      for(const raw of Array.from(txt)){ const ch = raw; const sil = silenceDuration(ch);
         if(sil !== null){ delay += sil; continue; }
         const idx = CHAR_LIST.indexOf(ch);
-        if(idx !== -1){
-          const midi = 21 + idx;
-          setTimeout(()=> playMidi(midi, 0.06), delay*1000);
-          delay += 0.06;
-        }
+        if(idx !== -1){ const midi = 21 + idx; setTimeout(()=> playMidi(midi, 0.06), delay*1000); delay += 0.06; }
       }
     }
-
-    // ————————————————————————————————
-    // 6) IRC WebSocket (anonyme) → #okplonk
-    // ————————————————————————————————
     let ws=null; let nick='justinfan'+Math.floor(Math.random()*1e6);
     const chan = '#okplonk';
     const logs = document.getElementById('logs'); const lastmsg = document.getElementById('lastmsg');
     const ignoreBots = new Set(['nightbot','streamelements','streamlabs']);
-
     function connectIRC(){
       if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) try{ ws.close(); }catch{}
       log('Connexion au serveur IRC...','info');
       ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
-      ws.onopen = ()=>{
-        log('Socket ouverte. Envoi des CAP/PASS/NICK/JOIN...','ok');
+      ws.onopen = ()=>{ log('Socket ouverte. Envoi des CAP/PASS/NICK/JOIN...','ok');
         send('CAP REQ :twitch.tv/tags twitch.tv/commands');
-        send('PASS SCHMOOPIIE'); // anonymes
+        send('PASS SCHMOOPIIE');
         send('NICK '+nick);
         send('JOIN '+chan);
         setState('connecting');
@@ -198,19 +152,10 @@
         if(line.includes(' 001 '+nick)) log('Connecté au serveur IRC','ok');
         if(line.includes(' 366 '+nick)){ log('Rejoint '+chan,'ok'); setState('connected'); }
         const m = line.match(/^(?:@[^ ]* )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/);
-        if(m){
-          const user = (m[1]||'').toLowerCase();
-          if(ignoreBots.has(user)) continue;
-          const msg = m[2]||'';
-          lastmsg.textContent = user+': '+msg;
-          playFromText(msg);
-        }
+        if(m){ const user = (m[1]||'').toLowerCase(); if(ignoreBots.has(user)) continue;
+          const msg = m[2]||''; lastmsg.textContent = user+': '+msg; playFromText(msg); }
       }
     }
-
-    // ————————————————————————————————
-    // 7) UI
-    // ————————————————————————————————
     document.getElementById('audio').addEventListener('click', ()=>{ if(ensureAudio()) actx.resume(); });
     function setState(status){
       const s=document.getElementById('state');
@@ -224,8 +169,6 @@
       s.textContent = audio + net;
     }
     function log(t, cls='info'){ const el=document.createElement('div'); el.className=cls; el.textContent='['+new Date().toLocaleTimeString()+'] '+t; logs.appendChild(el); logs.scrollTop=logs.scrollHeight; }
-
-    // Boot
     connectIRC();
   </script>
 </body>
