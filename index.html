@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="fr">
 <head>
@@ -17,7 +18,8 @@
     .muted{color:var(--muted);font-size:13px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     button{background:linear-gradient(180deg,#0f1b3d,#0c1530);border:1px solid rgba(255,255,255,0.08);color:#e8eef7;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
-    .piano{position:relative;height:180px;user-select:none;display:flex; background:#0b1229;border-radius:10px;padding:8px}
+    select{background:#0c1530;color:#e8eef7;border:1px solid rgba(255,255,255,0.08);padding:6px 8px;border-radius:8px;font-size:14px}
+    .piano{position:relative;height:180px;user-select:none;display:flex;background:#0b1229;border-radius:10px;padding:8px}
     .white{width:calc(100%/52);height:100%;background:#f2f4f8;border:1px solid #cfd7e3;position:relative}
     .white.active{background:#dbe7ff}
     .black{position:absolute;top:8px;height:60%;width:calc(100%/52 * .62);background:#1b2330;border:1px solid #0b1220;z-index:2;transform:translateX(-50%)}
@@ -37,6 +39,13 @@
       <div class="muted">Mapping ordre: <strong>A–Z</strong>, puis <strong>a–z</strong>, puis <strong>symboles</strong> → 88 notes (A0 → C8). Chiffres = silences (1=0.1s … 9=0.9s, 0=1s).</div>
       <div class="row" style="margin-top:8px">
         <button id="audio">Activer l'audio</button>
+        <select id="instrument">
+          <option value="acoustic_grand_piano" selected>🎹 Piano</option>
+          <option value="lead_1_square">🕹️ Synth 8-bit</option>
+          <option value="electric_guitar_clean">🎸 Guitare</option>
+          <option value="violin">🎻 Violon</option>
+          <option value="celesta">✨ Celesta</option>
+        </select>
         <span id="state" class="muted">Audio inactif · En attente</span>
       </div>
     </div>
@@ -62,27 +71,40 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/soundfont-player"></script>
+
   <script>
-    const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
-    let actx=null, master=null;
-    function ensureAudio(){ if(actx) return true;
-      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
+    const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\','|','~','`','§','€','£','¢'];
+    let actx=null, master=null, currentInstrument=null;
+
+    async function loadInstrument(name='acoustic_grand_piano'){
+      if(!actx) ensureAudio();
+      document.getElementById('state').textContent = 'Chargement de '+name+'...';
+      currentInstrument = await Soundfont.instrument(actx, name);
+      document.getElementById('state').textContent = '✅ Instrument chargé : '+name;
+    }
+
+    function ensureAudio(){
+      if(actx) return true;
+      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); loadInstrument(); setState(); return true; }
       catch(e){ log('AudioContext non supporté','err'); return false; }
     }
-    function midiToFreq(m){ return 440 * Math.pow(2, (m - 69)/12); }
+
     function midiName(m){ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const name = names[m%12]; const oct = Math.floor((m-12)/12); return name+oct; }
+
     function playMidi(midi, dur=0.1){
-      if(!actx) return;
-      const osc=actx.createOscillator(), g=actx.createGain();
-      osc.type='triangle'; osc.frequency.value=midiToFreq(midi);
-      const t=actx.currentTime, a=Math.min(0.012, dur*0.25), r=Math.max(0.02, dur*0.75);
-      g.gain.setValueAtTime(0,t);
-      g.gain.linearRampToValueAtTime(0.9,t+a);
-      g.gain.exponentialRampToValueAtTime(0.0009,t+a+r);
-      osc.connect(g); g.connect(master);
-      osc.start(t); osc.stop(t+a+r+0.01);
+      if(!actx || !currentInstrument) return;
+      const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      const octave = Math.floor(midi / 12) - 1;
+      const note = noteNames[midi % 12] + octave;
+      currentInstrument.play(note, actx.currentTime, { duration: dur });
       flashByMidi(midi);
     }
+
+    document.getElementById('instrument').addEventListener('change', e => loadInstrument(e.target.value));
+
+    // === Tout le reste est inchangé (graphique, connexion, mapping) ===
+
     const pianoEl = document.getElementById('piano'); const keyEls=[];
     const A0_MIDI = 21;
     (function buildPiano(){
@@ -105,7 +127,9 @@
       }
       new ResizeObserver(place).observe(pianoEl); place();
     })();
+
     function flashByMidi(midi){ const k = midi - A0_MIDI; const el = keyEls[k]; if(!el) return; el.classList.add('active'); setTimeout(()=>el.classList.remove('active'), 140); }
+
     (function buildRecap(){
       const wrap = document.getElementById('recap');
       for(let i=0;i<88;i++){
@@ -116,6 +140,7 @@
         el.appendChild(left); el.appendChild(right); wrap.appendChild(el);
       }
     })();
+
     function silenceDuration(ch){ if(ch==='0') return 1.0; if(/[1-9]/.test(ch)) return parseInt(ch,10)/10; return null; }
     function playFromText(txt){
       if(!ensureAudio()) return; let delay = 0;
@@ -125,6 +150,7 @@
         if(idx !== -1){ const midi = 21 + idx; setTimeout(()=> playMidi(midi, 0.06), delay*1000); delay += 0.06; }
       }
     }
+
     let ws=null; let nick='justinfan'+Math.floor(Math.random()*1e6);
     const chan = '#okplonk';
     const logs = document.getElementById('logs'); const lastmsg = document.getElementById('lastmsg');
