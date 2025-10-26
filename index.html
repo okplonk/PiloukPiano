@@ -64,112 +64,24 @@
 
   <script>
     const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
-    
-    // Variables pour l'audio
-    let audioContext = null;
-    let audioInitialized = false;
-    let audioBuffers = {};
-    
-    // Initialiser l'audio
-    async function ensureAudio() {
-      if (audioInitialized) return true;
-      
-      try {
-        // Créer le contexte audio
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // Créer un échantillon de base (note A4 = 69)
-        const sampleRate = audioContext.sampleRate;
-        const duration = 1.0; // seconde
-        const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
-        const data = buffer.getChannelData(0);
-        
-        // Générer un son de piano simple
-        for (let i = 0; i < data.length; i++) {
-          const t = i / sampleRate;
-          // Fréquence de base (A4 = 440Hz)
-          const freq = 440;
-          // Enveloppe ADSR
-          const attack = 0.01;
-          const decay = 0.2;
-          const sustain = 0.3;
-          const release = 0.5;
-          
-          let env = 0;
-          
-          if (t < attack) {
-            env = t / attack;
-          } else if (t < attack + decay) {
-            env = 1 - (1 - sustain) * ((t - attack) / decay);
-          } else if (t < duration - release) {
-            env = sustain;
-          } else {
-            env = sustain * (1 - (t - (duration - release)) / release);
-          }
-          
-          // Oscillateur avec harmoniques pour un son plus riche
-          data[i] = (
-            0.6 * Math.sin(2 * Math.PI * freq * t) + 
-            0.3 * Math.sin(2 * Math.PI * 2 * freq * t) * Math.exp(-2 * t) +
-            0.1 * Math.sin(2 * Math.PI * 3 * freq * t) * Math.exp(-3 * t)
-          ) * env * 0.3; // Réduire le volume
-        }
-        
-        audioBuffers['piano'] = buffer;
-        audioInitialized = true;
-        setState('connected');
-        log('Audio prêt', 'ok');
-        return true;
-        
-      } catch (e) {
-        console.error('Erreur d\'initialisation audio:', e);
-        log('Erreur audio: ' + e.message, 'err');
-        setState('error');
-        return false;
-      }
+    let actx=null, master=null;
+    function ensureAudio(){ if(actx) return true;
+      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); setState(); return true; }
+      catch(e){ log('AudioContext non supporté','err'); return false; }
     }
-    
-    // Jouer une note
-    function playMidi(note, duration = 500) {
-      if (!audioInitialized && !ensureAudio()) return;
-      
-      try {
-        // Créer la source audio
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffers['piano'];
-        
-        // Ajuster la hauteur en fonction de la note MIDI
-        const playbackRate = Math.pow(2, (note - 69) / 12);
-        source.playbackRate.setValueAtTime(playbackRate, audioContext.currentTime);
-        
-        // Créer un nœud de gain pour contrôler le volume
-        const gainNode = audioContext.createGain();
-        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-        
-        // Connecter et démarrer
-        source.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        // Mettre en surbrillance la touche du piano
-        flashByMidi(note);
-        
-        // Démarrer la lecture
-        source.start();
-        
-        // Arrêter après la durée spécifiée
-        source.stop(audioContext.currentTime + (duration / 1000));
-        
-      } catch (e) {
-        console.error('Erreur lors de la lecture de la note:', e);
-      }
-    }
-    
-    // Fonction utilitaire pour obtenir le nom de la note MIDI
-    function midiName(m) { 
-      const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; 
-      const name = names[m % 12]; 
-      const oct = Math.floor((m - 12) / 12); 
-      return name + oct; 
+    function midiToFreq(m){ return 440 * Math.pow(2, (m - 69)/12); }
+    function midiName(m){ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const name = names[m%12]; const oct = Math.floor((m-12)/12); return name+oct; }
+    function playMidi(midi, dur=0.1){
+      if(!actx) return;
+      const osc=actx.createOscillator(), g=actx.createGain();
+      osc.type='triangle'; osc.frequency.value=midiToFreq(midi);
+      const t=actx.currentTime, a=Math.min(0.012, dur*0.25), r=Math.max(0.02, dur*0.75);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.9,t+a);
+      g.gain.exponentialRampToValueAtTime(0.0009,t+a+r);
+      osc.connect(g); g.connect(master);
+      osc.start(t); osc.stop(t+a+r+0.01);
+      flashByMidi(midi);
     }
     const pianoEl = document.getElementById('piano'); const keyEls=[];
     const A0_MIDI = 21;
@@ -205,30 +117,12 @@
       }
     })();
     function silenceDuration(ch){ if(ch==='0') return 1.0; if(/[1-9]/.test(ch)) return parseInt(ch,10)/10; return null; }
-    async function playFromText(txt) {
-      if (!(await ensureAudio())) return;
-      let delay = 0;
-      
-      for (const ch of txt) {
-        const sil = silenceDuration(ch);
-        if (sil !== null) {
-          delay += sil;
-          continue;
-        }
-        
+    function playFromText(txt){
+      if(!ensureAudio()) return; let delay = 0;
+      for(const raw of Array.from(txt)){ const ch = raw; const sil = silenceDuration(ch);
+        if(sil !== null){ delay += sil; continue; }
         const idx = CHAR_LIST.indexOf(ch);
-        if (idx !== -1) {
-          const midi = 21 + idx;
-          // Augmenter légèrement la durée des notes pour un son plus réaliste
-          const duration = 0.2 + (Math.random() * 0.3); // Durée aléatoire entre 0.2 et 0.5 secondes
-          
-          // Jouer la note avec un léger décalage aléatoire pour un son plus naturel
-          const noteDelay = delay + (Math.random() * 0.02);
-          setTimeout(() => playMidi(midi, duration), noteDelay * 1000);
-          
-          // Espacer légèrement les notes pour éviter la surcharge
-          delay += 0.1 + (Math.random() * 0.05);
-        }
+        if(idx !== -1){ const midi = 21 + idx; setTimeout(()=> playMidi(midi, 0.06), delay*1000); delay += 0.06; }
       }
     }
     let ws=null; let nick='justinfan'+Math.floor(Math.random()*1e6);
@@ -262,13 +156,7 @@
           const msg = m[2]||''; lastmsg.textContent = user+': '+msg; playFromText(msg); }
       }
     }
-    document.getElementById('audio').addEventListener('click', async () => { 
-      if (await ensureAudio()) {
-        if (actx.state === 'suspended') {
-          await actx.resume();
-        }
-      }
-    });
+    document.getElementById('audio').addEventListener('click', ()=>{ if(ensureAudio()) actx.resume(); });
     function setState(status){
       const s=document.getElementById('state');
       let audio = actx ? (actx.state==='running'?'Audio actif':'Audio prêt') : 'Audio inactif';
