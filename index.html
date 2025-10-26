@@ -65,108 +65,84 @@
   <script>
     const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
     
-    // Variables pour le synthétiseur
-    let midiOutput = null;
-    let midiAccess = null;
+    // Variables pour le synthétiseur audio
     let audioContext = null;
     let audioInitialized = false;
     
     // Initialiser le contexte audio
-    function initAudioContext() {
-      if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    async function ensureAudio() { 
+      if (audioInitialized) return true;
+      
+      try { 
+        // Initialiser l'audio
+        const success = initAudio();
+        
+        if (success) {
+          audioInitialized = true;
+          setState('connected');
+          log('Audio prêt', 'ok');
+        } else {
+          setState('error');
+        }
+        
+        return success;
+        
+      } catch(e) { 
+        console.error('Erreur d\'initialisation audio:', e);
+        log('Erreur audio: ' + e.message, 'err');
+        setState('error');
+        return false;
       }
-      return audioContext;
     }
 
-    // Créer un oscillateur pour la solution de secours
-    function createOscillator(frequency, duration) {
-      if (!audioContext) initAudioContext();
+    // Créer un son de piano simple
+    function playPianoNote(note, duration = 0.5) {
+      if (!audioContext && !ensureAudio()) return;
       
-      const osc = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      osc.type = 'sine';
-      osc.frequency.value = frequency;
-      
-      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
-      
-      osc.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      osc.start();
-      osc.stop(audioContext.currentTime + duration);
-      
-      return osc;
-    }
-    
-    // Initialiser la sortie MIDI avec solution de secours
-    async function initMIDI() {
       try {
-        // Essayer d'utiliser Web MIDI API si disponible
-        if (navigator.requestMIDIAccess) {
-          midiAccess = await navigator.requestMIDIAccess({ sysex: false });
-          const outputs = midiAccess.outputs.values();
-          
-          for (const output of outputs) {
-            midiOutput = output;
-            log('Périphérique MIDI connecté: ' + output.name, 'ok');
-            return true;
-          }
-        }
+        // Convertir la note MIDI en fréquence (A4 = 69 = 440Hz)
+        const frequency = 440 * Math.pow(2, (note - 69) / 12);
         
-        // Si pas de MIDI, initialiser le contexte audio
-        initAudioContext();
-        log('Utilisation du synthétiseur audio intégré', 'warn');
-        return true;
+        // Créer les nœuds audio
+        const osc = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        // Configurer l'oscillateur
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(frequency, audioContext.currentTime);
+        
+        // Configurer l'enveloppe ADSR
+        const now = audioContext.currentTime;
+        const attack = 0.01;
+        const decay = 0.1;
+        const sustain = 0.2;
+        const release = Math.max(0.1, duration * 0.5);
+        
+        // Appliquer l'enveloppe au gain
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.3, now + attack);
+        gainNode.gain.exponentialRampToValueAtTime(sustain, now + attack + decay);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + attack + decay + release);
+        
+        // Connecter et démarrer
+        osc.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        osc.start();
+        osc.stop(now + attack + decay + release + 0.1);
+        
+        // Mettre en surbrillance la touche du piano
+        flashByMidi(note);
         
       } catch (e) {
-        console.error('Erreur MIDI:', e);
-        // En cas d'erreur, utiliser le synthétiseur audio
-        initAudioContext();
-        log('Utilisation du synthétiseur audio intégré (erreur MIDI)', 'warn');
-        return true;
+        console.error('Erreur lors de la lecture de la note:', e);
       }
     }
     
-    // Jouer une note (MIDI ou synthé audio)
+    // Jouer une note
     function playMidi(note, duration = 500) {
-      // Convertir la note MIDI en fréquence (A4 = 69 = 440Hz)
-      const frequency = 440 * Math.pow(2, (note - 69) / 12);
-      
-      // Essayer d'utiliser MIDI si disponible
-      if (midiOutput) {
-        try {
-          // Note On (vélocité 127 = volume max)
-          const noteOn = [0x90, note, 127];
-          midiOutput.send(noteOn);
-          
-          // Note Off après la durée spécifiée
-          setTimeout(() => {
-            try {
-              const noteOff = [0x80, note, 0];
-              midiOutput.send(noteOff);
-            } catch (e) {
-              console.error('Erreur Note Off:', e);
-            }
-          }, duration);
-          
-        } catch (e) {
-          console.error('Erreur MIDI, basculement sur audio:', e);
-          // En cas d'erreur, utiliser le synthé audio
-          createOscillator(frequency, duration / 1000);
-        }
-      } else if (audioContext) {
-        // Utiliser le synthé audio
-        createOscillator(frequency, duration / 1000);
-      } else {
-        log('Aucun périphérique audio disponible', 'err');
-        return;
-      }
-      
-      // Mettre en surbrillance la touche du piano
-      flashByMidi(note);
+      // Jouer la note avec le synthétiseur audio
+      playPianoNote(note, duration / 1000);
     }
     
     // Fonction utilitaire pour obtenir le nom de la note MIDI
