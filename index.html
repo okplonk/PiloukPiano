@@ -64,85 +64,65 @@
 
   <script>
     const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
-    let actx = null, master = null, pianoSamples = {};
-    async function loadPianoSamples() {
-      // Charger un échantillon de base qui sera transposé
-      const response = await fetch('https://tonejs.github.io/audio/salamander/As1v1.mp3');
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await actx.decodeAudioData(arrayBuffer);
-      
-      // Stocker l'échantillon de base
-      pianoSamples.baseSample = audioBuffer;
-      return true;
-    }
-
-    async function ensureAudio() { 
-      if (actx) return true;
-      try { 
-        actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); 
-        master.gain.value = 0.5; 
-        master.connect(actx.destination); 
+    
+    // Variables pour le synthétiseur MIDI
+    let midiOutput = null;
+    let midiAccess = null;
+    
+    // Initialiser la sortie MIDI
+    async function initMIDI() {
+      try {
+        if (!navigator.requestMIDIAccess) {
+          throw new Error('Web MIDI API non supportée par votre navigateur');
+        }
         
-        // Charger les échantillons de piano
-        await loadPianoSamples();
+        midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+        const outputs = midiAccess.outputs.values();
         
-        setState(); 
-        return true; 
-      } catch(e) { 
-        log('Erreur d\'initialisation audio: ' + e, 'err'); 
-        return false; 
+        // Utiliser le premier périphérique de sortie MIDI disponible
+        for (const output of outputs) {
+          midiOutput = output;
+          log('Périphérique MIDI connecté: ' + output.name, 'ok');
+          return true;
+        }
+        
+        throw new Error('Aucun périphérique MIDI de sortie trouvé');
+      } catch (e) {
+        log('Erreur MIDI: ' + e.message, 'err');
+        return false;
       }
     }
-    function midiToPlaybackRate(midi) {
-      // A4 (69) est la note de référence (440Hz)
-      const baseMidi = 21; // A0
-      const baseNote = 33; // A1 dans l'échantillon
-      // Calculer le facteur de lecture pour transposer l'échantillon
-      return Math.pow(2, (midi - baseMidi - baseNote) / 12);
-    }
-    function midiName(m){ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const name = names[m%12]; const oct = Math.floor((m-12)/12); return name+oct; }
-    function playMidi(midi, dur=0.5) {
-      if (!actx || !pianoSamples.baseSample) return;
+    
+    // Jouer une note MIDI
+    function playMidi(note, duration = 500) {
+      if (!midiOutput) {
+        log('Erreur: Aucun périphérique MIDI disponible', 'err');
+        return;
+      }
       
       try {
-        const source = actx.createBufferSource();
-        source.buffer = pianoSamples.baseSample;
+        // Note On (vélocité 127 = volume max)
+        const noteOn = [0x90, note, 127];
+        midiOutput.send(noteOn);
         
-        // Ajuster la hauteur pour correspondre à la note MIDI
-        const playbackRate = midiToPlaybackRate(midi);
-        source.playbackRate.value = playbackRate;
+        // Note Off après la durée spécifiée
+        setTimeout(() => {
+          const noteOff = [0x80, note, 0];
+          midiOutput.send(noteOff);
+          flashByMidi(note);
+        }, duration);
         
-        // Créer un enveloppe pour le son
-        const gainNode = actx.createGain();
-        const now = actx.currentTime;
-        
-        // Ajuster la durée en fonction de la hauteur pour un son plus naturel
-        const duration = dur * (1 + (1 - (midi / 127)) * 0.5);
-        
-        // Enveloppe ADSR (Attack, Decay, Sustain, Release)
-        const attack = 0.01;
-        const decay = 0.1;
-        const sustain = 0.6;
-        const release = Math.max(0.1, duration * 0.8);
-        
-        gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(0.8, now + attack);
-        gainNode.gain.exponentialRampToValueAtTime(sustain, now + attack + decay);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + attack + decay + release);
-        
-        source.connect(gainNode);
-        gainNode.connect(master);
-        
-        // Jouer la note
-        source.start(now);
-        source.stop(now + attack + decay + release + 0.1);
-        
-        // Mettre en surbrillance la touche du piano
-        flashByMidi(midi);
       } catch (e) {
-        console.error('Erreur lors de la lecture de la note:', e);
+        log('Erreur lors de la lecture MIDI: ' + e.message, 'err');
       }
+    }
+    
+    // Fonction utilitaire pour obtenir le nom de la note MIDI
+    function midiName(m) { 
+      const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; 
+      const name = names[m % 12]; 
+      const oct = Math.floor((m - 12) / 12); 
+      return name + oct; 
     }
     const pianoEl = document.getElementById('piano'); const keyEls=[];
     const A0_MIDI = 21;
