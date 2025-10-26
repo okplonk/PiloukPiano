@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="fr">
 <head>
@@ -18,8 +17,7 @@
     .muted{color:var(--muted);font-size:13px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     button{background:linear-gradient(180deg,#0f1b3d,#0c1530);border:1px solid rgba(255,255,255,0.08);color:#e8eef7;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
-    select{background:#0c1530;color:#e8eef7;border:1px solid rgba(255,255,255,0.08);padding:6px 8px;border-radius:8px;font-size:14px}
-    .piano{position:relative;height:180px;user-select:none;display:flex;background:#0b1229;border-radius:10px;padding:8px}
+    .piano{position:relative;height:180px;user-select:none;display:flex; background:#0b1229;border-radius:10px;padding:8px}
     .white{width:calc(100%/52);height:100%;background:#f2f4f8;border:1px solid #cfd7e3;position:relative}
     .white.active{background:#dbe7ff}
     .black{position:absolute;top:8px;height:60%;width:calc(100%/52 * .62);background:#1b2330;border:1px solid #0b1220;z-index:2;transform:translateX(-50%)}
@@ -39,13 +37,6 @@
       <div class="muted">Mapping ordre: <strong>A–Z</strong>, puis <strong>a–z</strong>, puis <strong>symboles</strong> → 88 notes (A0 → C8). Chiffres = silences (1=0.1s … 9=0.9s, 0=1s).</div>
       <div class="row" style="margin-top:8px">
         <button id="audio">Activer l'audio</button>
-        <select id="instrument">
-          <option value="acoustic_grand_piano" selected>🎹 Piano</option>
-          <option value="lead_1_square">🕹️ Synth 8-bit</option>
-          <option value="electric_guitar_clean">🎸 Guitare</option>
-          <option value="violin">🎻 Violon</option>
-          <option value="celesta">✨ Celesta</option>
-        </select>
         <span id="state" class="muted">Audio inactif · En attente</span>
       </div>
     </div>
@@ -71,40 +62,88 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/soundfont-player"></script>
-
   <script>
-    const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\','|','~','`','§','€','£','¢'];
-    let actx=null, master=null, currentInstrument=null;
-
-    async function loadInstrument(name='acoustic_grand_piano'){
-      if(!actx) ensureAudio();
-      document.getElementById('state').textContent = 'Chargement de '+name+'...';
-      currentInstrument = await Soundfont.instrument(actx, name);
-      document.getElementById('state').textContent = '✅ Instrument chargé : '+name;
+    const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
+    let actx = null, master = null, pianoSamples = {};
+    async function loadPianoSamples() {
+      // Charger un échantillon de base qui sera transposé
+      const response = await fetch('https://tonejs.github.io/audio/salamander/As1v1.mp3');
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await actx.decodeAudioData(arrayBuffer);
+      
+      // Stocker l'échantillon de base
+      pianoSamples.baseSample = audioBuffer;
+      return true;
     }
 
-    function ensureAudio(){
-      if(actx) return true;
-      try{ actx=new(window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=0.35; master.connect(actx.destination); loadInstrument(); setState(); return true; }
-      catch(e){ log('AudioContext non supporté','err'); return false; }
+    async function ensureAudio() { 
+      if (actx) return true;
+      try { 
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        master = actx.createGain(); 
+        master.gain.value = 0.5; 
+        master.connect(actx.destination); 
+        
+        // Charger les échantillons de piano
+        await loadPianoSamples();
+        
+        setState(); 
+        return true; 
+      } catch(e) { 
+        log('Erreur d\'initialisation audio: ' + e, 'err'); 
+        return false; 
+      }
     }
-
+    function midiToPlaybackRate(midi) {
+      // A4 (69) est la note de référence (440Hz)
+      const baseMidi = 21; // A0
+      const baseNote = 33; // A1 dans l'échantillon
+      // Calculer le facteur de lecture pour transposer l'échantillon
+      return Math.pow(2, (midi - baseMidi - baseNote) / 12);
+    }
     function midiName(m){ const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const name = names[m%12]; const oct = Math.floor((m-12)/12); return name+oct; }
-
-    function playMidi(midi, dur=0.1){
-      if(!actx || !currentInstrument) return;
-      const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-      const octave = Math.floor(midi / 12) - 1;
-      const note = noteNames[midi % 12] + octave;
-      currentInstrument.play(note, actx.currentTime, { duration: dur });
-      flashByMidi(midi);
+    function playMidi(midi, dur=0.5) {
+      if (!actx || !pianoSamples.baseSample) return;
+      
+      try {
+        const source = actx.createBufferSource();
+        source.buffer = pianoSamples.baseSample;
+        
+        // Ajuster la hauteur pour correspondre à la note MIDI
+        const playbackRate = midiToPlaybackRate(midi);
+        source.playbackRate.value = playbackRate;
+        
+        // Créer un enveloppe pour le son
+        const gainNode = actx.createGain();
+        const now = actx.currentTime;
+        
+        // Ajuster la durée en fonction de la hauteur pour un son plus naturel
+        const duration = dur * (1 + (1 - (midi / 127)) * 0.5);
+        
+        // Enveloppe ADSR (Attack, Decay, Sustain, Release)
+        const attack = 0.01;
+        const decay = 0.1;
+        const sustain = 0.6;
+        const release = Math.max(0.1, duration * 0.8);
+        
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.8, now + attack);
+        gainNode.gain.exponentialRampToValueAtTime(sustain, now + attack + decay);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + attack + decay + release);
+        
+        source.connect(gainNode);
+        gainNode.connect(master);
+        
+        // Jouer la note
+        source.start(now);
+        source.stop(now + attack + decay + release + 0.1);
+        
+        // Mettre en surbrillance la touche du piano
+        flashByMidi(midi);
+      } catch (e) {
+        console.error('Erreur lors de la lecture de la note:', e);
+      }
     }
-
-    document.getElementById('instrument').addEventListener('change', e => loadInstrument(e.target.value));
-
-    // === Tout le reste est inchangé (graphique, connexion, mapping) ===
-
     const pianoEl = document.getElementById('piano'); const keyEls=[];
     const A0_MIDI = 21;
     (function buildPiano(){
@@ -127,9 +166,7 @@
       }
       new ResizeObserver(place).observe(pianoEl); place();
     })();
-
     function flashByMidi(midi){ const k = midi - A0_MIDI; const el = keyEls[k]; if(!el) return; el.classList.add('active'); setTimeout(()=>el.classList.remove('active'), 140); }
-
     (function buildRecap(){
       const wrap = document.getElementById('recap');
       for(let i=0;i<88;i++){
@@ -140,17 +177,33 @@
         el.appendChild(left); el.appendChild(right); wrap.appendChild(el);
       }
     })();
-
     function silenceDuration(ch){ if(ch==='0') return 1.0; if(/[1-9]/.test(ch)) return parseInt(ch,10)/10; return null; }
-    function playFromText(txt){
-      if(!ensureAudio()) return; let delay = 0;
-      for(const raw of Array.from(txt)){ const ch = raw; const sil = silenceDuration(ch);
-        if(sil !== null){ delay += sil; continue; }
+    async function playFromText(txt) {
+      if (!(await ensureAudio())) return;
+      let delay = 0;
+      
+      for (const ch of txt) {
+        const sil = silenceDuration(ch);
+        if (sil !== null) {
+          delay += sil;
+          continue;
+        }
+        
         const idx = CHAR_LIST.indexOf(ch);
-        if(idx !== -1){ const midi = 21 + idx; setTimeout(()=> playMidi(midi, 0.06), delay*1000); delay += 0.06; }
+        if (idx !== -1) {
+          const midi = 21 + idx;
+          // Augmenter légèrement la durée des notes pour un son plus réaliste
+          const duration = 0.2 + (Math.random() * 0.3); // Durée aléatoire entre 0.2 et 0.5 secondes
+          
+          // Jouer la note avec un léger décalage aléatoire pour un son plus naturel
+          const noteDelay = delay + (Math.random() * 0.02);
+          setTimeout(() => playMidi(midi, duration), noteDelay * 1000);
+          
+          // Espacer légèrement les notes pour éviter la surcharge
+          delay += 0.1 + (Math.random() * 0.05);
+        }
       }
     }
-
     let ws=null; let nick='justinfan'+Math.floor(Math.random()*1e6);
     const chan = '#okplonk';
     const logs = document.getElementById('logs'); const lastmsg = document.getElementById('lastmsg');
@@ -182,7 +235,13 @@
           const msg = m[2]||''; lastmsg.textContent = user+': '+msg; playFromText(msg); }
       }
     }
-    document.getElementById('audio').addEventListener('click', ()=>{ if(ensureAudio()) actx.resume(); });
+    document.getElementById('audio').addEventListener('click', async () => { 
+      if (await ensureAudio()) {
+        if (actx.state === 'suspended') {
+          await actx.resume();
+        }
+      }
+    });
     function setState(status){
       const s=document.getElementById('state');
       let audio = actx ? (actx.state==='running'?'Audio actif':'Audio prêt') : 'Audio inactif';
