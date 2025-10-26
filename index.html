@@ -65,84 +65,103 @@
   <script>
     const CHAR_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','!','@','#','$','%','^','&','*','(',')','-','_','=','+','[',']','{','}',';',':',"'",'"',',','.','<','>','/','?','\\','|','~','`','§','€','£','¢'];
     
-    // Variables pour le synthétiseur audio
+    // Variables pour l'audio
     let audioContext = null;
     let audioInitialized = false;
+    let audioBuffers = {};
     
-    // Initialiser le contexte audio
-    async function ensureAudio() { 
+    // Initialiser l'audio
+    async function ensureAudio() {
       if (audioInitialized) return true;
       
-      try { 
-        // Initialiser l'audio
-        const success = initAudio();
+      try {
+        // Créer le contexte audio
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
         
-        if (success) {
-          audioInitialized = true;
-          setState('connected');
-          log('Audio prêt', 'ok');
-        } else {
-          setState('error');
+        // Créer un échantillon de base (note A4 = 69)
+        const sampleRate = audioContext.sampleRate;
+        const duration = 1.0; // seconde
+        const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
+        const data = buffer.getChannelData(0);
+        
+        // Générer un son de piano simple
+        for (let i = 0; i < data.length; i++) {
+          const t = i / sampleRate;
+          // Fréquence de base (A4 = 440Hz)
+          const freq = 440;
+          // Enveloppe ADSR
+          const attack = 0.01;
+          const decay = 0.2;
+          const sustain = 0.3;
+          const release = 0.5;
+          
+          let env = 0;
+          
+          if (t < attack) {
+            env = t / attack;
+          } else if (t < attack + decay) {
+            env = 1 - (1 - sustain) * ((t - attack) / decay);
+          } else if (t < duration - release) {
+            env = sustain;
+          } else {
+            env = sustain * (1 - (t - (duration - release)) / release);
+          }
+          
+          // Oscillateur avec harmoniques pour un son plus riche
+          data[i] = (
+            0.6 * Math.sin(2 * Math.PI * freq * t) + 
+            0.3 * Math.sin(2 * Math.PI * 2 * freq * t) * Math.exp(-2 * t) +
+            0.1 * Math.sin(2 * Math.PI * 3 * freq * t) * Math.exp(-3 * t)
+          ) * env * 0.3; // Réduire le volume
         }
         
-        return success;
+        audioBuffers['piano'] = buffer;
+        audioInitialized = true;
+        setState('connected');
+        log('Audio prêt', 'ok');
+        return true;
         
-      } catch(e) { 
+      } catch (e) {
         console.error('Erreur d\'initialisation audio:', e);
         log('Erreur audio: ' + e.message, 'err');
         setState('error');
         return false;
       }
     }
-
-    // Créer un son de piano simple
-    function playPianoNote(note, duration = 0.5) {
-      if (!audioContext && !ensureAudio()) return;
+    
+    // Jouer une note
+    function playMidi(note, duration = 500) {
+      if (!audioInitialized && !ensureAudio()) return;
       
       try {
-        // Convertir la note MIDI en fréquence (A4 = 69 = 440Hz)
-        const frequency = 440 * Math.pow(2, (note - 69) / 12);
+        // Créer la source audio
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffers['piano'];
         
-        // Créer les nœuds audio
-        const osc = audioContext.createOscillator();
+        // Ajuster la hauteur en fonction de la note MIDI
+        const playbackRate = Math.pow(2, (note - 69) / 12);
+        source.playbackRate.setValueAtTime(playbackRate, audioContext.currentTime);
+        
+        // Créer un nœud de gain pour contrôler le volume
         const gainNode = audioContext.createGain();
-        
-        // Configurer l'oscillateur
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(frequency, audioContext.currentTime);
-        
-        // Configurer l'enveloppe ADSR
-        const now = audioContext.currentTime;
-        const attack = 0.01;
-        const decay = 0.1;
-        const sustain = 0.2;
-        const release = Math.max(0.1, duration * 0.5);
-        
-        // Appliquer l'enveloppe au gain
-        gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(0.3, now + attack);
-        gainNode.gain.exponentialRampToValueAtTime(sustain, now + attack + decay);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + attack + decay + release);
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
         
         // Connecter et démarrer
-        osc.connect(gainNode);
+        source.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        
-        osc.start();
-        osc.stop(now + attack + decay + release + 0.1);
         
         // Mettre en surbrillance la touche du piano
         flashByMidi(note);
         
+        // Démarrer la lecture
+        source.start();
+        
+        // Arrêter après la durée spécifiée
+        source.stop(audioContext.currentTime + (duration / 1000));
+        
       } catch (e) {
         console.error('Erreur lors de la lecture de la note:', e);
       }
-    }
-    
-    // Jouer une note
-    function playMidi(note, duration = 500) {
-      // Jouer la note avec le synthétiseur audio
-      playPianoNote(note, duration / 1000);
     }
     
     // Fonction utilitaire pour obtenir le nom de la note MIDI
